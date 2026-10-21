@@ -3,7 +3,6 @@ import GuestLayout from '../../../layouts/GuestLayout.astro';
 import Envelope from '../../../components/Envelope.astro';
 import {
   getEventBySlug,
-  getGuest,
   touchGuest,
   setRsvp,
   listBringForGuest,
@@ -15,15 +14,14 @@ import {
   deleteOwnPost,
   type Rsvp,
 } from '../../../lib/queries';
-import { getGuestSession } from '../../../lib/auth';
+import { currentGuest } from '../../../lib/session';
 import { str, int, uuid } from '../../../lib/form';
 import { eventDateParts, relativeDay, timeAgo } from '../../../lib/time';
 
 const slug = Astro.params.slug ?? '';
 const event = await getEventBySlug(slug);
-const session = getGuestSession(Astro.cookies);
-if (!event || session?.eventId !== event.id) return Astro.redirect(`/e/${slug}`);
-const guest = await getGuest(session.guestId, event.id);
+if (!event) return Astro.redirect(`/e/${slug}`);
+const guest = await currentGuest(Astro.cookies, event);
 if (!guest) return Astro.redirect(`/e/${slug}`);
 
 const back = (message: string, anchor: string) => Astro.redirect(`/e/${slug}/home?m=${message}#${anchor}`);
@@ -93,6 +91,8 @@ const mapsUrl =
 const monogram = (event.title.match(/[\p{L}\p{N}]/u)?.[0] ?? '✶').toUpperCase();
 const opened = Astro.url.searchParams.get('opened') === '1';
 
+// Work out each gift's state here: a `<` inside the template below would be
+// read by Astro's compiler as the start of a tag.
 const gifts = registry.map((item) => {
   const left = Math.max(item.quantity - item.claimed, 0);
   const gone = left === 0 && !item.mine;
@@ -353,7 +353,7 @@ const jumps = [
             {event.host_sees_claims ? ` ${hostCap} can see who claimed what.` : ` ${hostCap} won’t see who picked what.`}
           </p>
           <ul class="gifts">
-              {gifts.map((item) => (
+            {gifts.map((item) => (
               <li class:list={['gift', { 'is-mine': item.mine, 'is-gone': item.gone }]}>
                 <p class="gift-title">
                   {item.url ? (

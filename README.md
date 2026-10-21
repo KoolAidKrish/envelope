@@ -6,7 +6,7 @@
 
 Group chats are where event details go to die. Someone asks "wait, what time?" for the fourth time, the address is buried under 200 memes, and nobody knows who's actually coming.
 
-Envelope gives every guest their own invitation. They open your link, type their name, and answer a question you wrote just for them ("What did we name the class hamster?"). Get it right and the envelope opens on everything they need:
+Envelope gives every guest their own invitation. They open the private link you sent them and answer a question you wrote just for them ("What did we name the class hamster?"). Get it right and the envelope opens on everything they need:
 
 - **When and where**, with a map link and an add-to-calendar button
 - **An RSVP**, with plus-ones if you allow them and a spot for "I'm vegetarian" notes
@@ -43,7 +43,7 @@ Deploying another way? Connect the repo in Netlify yourself and add the same thr
 
 ### 3. Host something
 
-Open `https://your-site.netlify.app/admin`, sign in, and create an event. Add guests, then hit **Copy invite** next to each one. That copies a ready-to-send message with their personal link (their name is already filled in).
+Open `https://your-site.netlify.app/admin`, sign in, and create an event. Add guests, then hit **Copy invite** next to each one. That copies a ready-to-send message with that guest's private link. Send each one only to its guest.
 
 ### 4. Use your own domain (optional)
 
@@ -51,15 +51,17 @@ In Netlify, go to **Domain management > Add a domain**. A subdomain like `party.
 
 ## How sign-in works
 
-Each guest signs in with their name and the answer to their question. A few things keep that honest:
+Every guest gets a private link, `/i/<token>`, where the token is 122 random bits. The link picks the guest; the answer to their question signs them in. Two things are needed, and a stranger has neither.
 
+- **Nothing to guess from outside.** The shared event address (`/e/<event>`) takes no names and shows nothing about the event, so nobody can test names to learn who's invited.
 - **Answers aren't stored.** Only a scrypt hash is, so even you can't read them back. Forgot one? Set a new answer in the guest's Edit panel.
-- **Typing is forgiving.** "Professor Nibbles!" and "professor nibbles" are the same answer, and a guest can type just their first name if nobody else shares it.
+- **Typing is forgiving.** "Professor Nibbles!" and "professor nibbles" are the same answer.
 - **Guessing is slow.** Five wrong answers locks that guest out for 15 minutes. You can unlock them from the guest list.
+- **Leaked links can be cancelled.** **New link** on the guest list replaces a guest's link. The old one stops working and anyone signed in with it is signed out.
 - **Sessions are signed cookies.** They're HTTP-only, so page scripts can't read them, and they last 60 days for guests and 7 for you.
 - **The database is closed to the public.** Tables live in their own `envelope` schema with row level security on, so Supabase's public API can't touch them. Only the server, with your connection string, can.
 
-The one honest caveat: an invitation is only as private as its question. "What's my favourite colour?" is guessable. "What did I spill on your couch in 2019?" is not. Write questions only the two of you could answer, and it's genuinely hard to get in.
+The honest caveat: if a guest forwards their link, the question is the only lock left. "What's my favourite colour?" is guessable. "What did I spill on your couch in 2019?" is not.
 
 ## Making it yours
 
@@ -68,7 +70,8 @@ Envelope is a normal [Astro](https://astro.build) site, so it's easy to bend:
 ```
 src/
   pages/
-    e/[slug]/          the guest side: sign-in, invitation, calendar file
+    i/[token].astro    a guest's private sign-in link
+    e/[slug]/          the guest's invitation and calendar file
     admin/             the host side
   components/admin/    one file per admin tab
   lib/

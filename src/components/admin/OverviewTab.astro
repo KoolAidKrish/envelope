@@ -7,9 +7,8 @@ interface Props {
   stats: { invited: number; yes: number; maybe: number; no: number; pending: number; headcount: number; seen: number };
   guests: GuestRow[];
   posts: PostRow[];
-  shareUrl: string;
 }
-const { event, stats, guests, posts, shareUrl } = Astro.props;
+const { event, stats, guests, posts } = Astro.props;
 const base = `/admin/events/${event.id}`;
 const unanswered = posts.filter((p) => !p.reply).slice(0, 5);
 const notes = guests.filter((g) => g.rsvp_note && g.rsvp !== 'no');
@@ -101,14 +100,11 @@ const rsvpWord = { yes: 'Going', maybe: 'Maybe', no: 'Can’t make it', pending:
         <div>
           <div class="panel">
             <div class="panel-head">
-              <h2>Invitation link</h2>
+              <h2>Sending invites</h2>
             </div>
-            <div class="share">
-              <input type="text" value={shareUrl} readonly aria-label="Invitation link" />
-              <button class="btn btn-secondary" type="button" data-copy={shareUrl}>Copy</button>
-            </div>
-            <p class="hint" style="margin-top:8px">
-              Everyone uses the same link and signs in with their own name. The Guests tab has personal invites with the name filled in.
+            <p class="muted">
+              Every guest has their own private link. Copy each one from the{' '}
+              <a href={`/admin/events/${event.id}?tab=guests`}>Guests tab</a> and send it to that person only.
             </p>
           </div>
 

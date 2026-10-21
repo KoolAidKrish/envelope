@@ -1,8 +1,9 @@
 // Creates (or resets) a demo event for trying the guest experience locally.
 // Usage: npm run db:demo            -> Midnight theme
 //        npm run db:demo -- garden  -> any theme id
-// Then open /e/demo-party and sign in as "Alex Demo", answer "pancakes".
+// It prints Alex's private invite link (/i/<token>); the answer is "pancakes".
 import { randomBytes, scrypt as scryptCb } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import postgres from 'postgres';
 
@@ -17,6 +18,10 @@ if (!url) {
 }
 const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
 const sql = postgres(url, { prepare: false, max: 1, ssl: local ? false : 'require', onnotice: () => {} });
+
+// Bring the tables up to date first (adds invite tokens to older databases).
+const setup = sql.unsafe(await readFile(new URL('../db/schema.sql', import.meta.url), 'utf8'));
+await (typeof setup.simple === 'function' ? setup.simple() : setup);
 
 // Same format as hashAnswer() in src/lib/auth.ts (fine for one-word lowercase answers).
 async function hashAnswer(answer) {
@@ -41,7 +46,7 @@ const [alex] = await sql`
   insert into envelope.guests (event_id, name, name_key, question, answer_hash, note, max_plus_ones)
   values (${event.id}, 'Alex Demo', 'alex demo', 'What did we eat at 3am after the concert?',
     ${await hashAnswer('pancakes')}, 'Save me a seat by the heater. It would not be the same without you.', 2)
-  returning id`;
+  returning id, invite_token`;
 const [sam] = await sql`
   insert into envelope.guests (event_id, name, name_key, question, answer_hash, rsvp)
   values (${event.id}, 'Sam Sample', 'sam sample', 'Favourite colour?', ${await hashAnswer('green')}, 'yes')
@@ -64,4 +69,4 @@ await sql`insert into envelope.posts (event_id, guest_id, body, is_public, reply
   (${event.id}, ${sam.id}, 'Is there parking nearby?', true, 'Street parking after 6 is free. Or bike, there''s a rack.', now())`;
 
 await sql.end();
-console.log(`Demo ready (${theme}): /e/${SLUG}  name "Alex Demo", answer "pancakes"`);
+console.log(`Demo ready (${theme}): /i/${alex.invite_token}  answer "pancakes"`);

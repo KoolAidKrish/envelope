@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { getEventBySlug } from '../../../lib/queries';
-import { getGuestSession } from '../../../lib/auth';
+import { currentGuest } from '../../../lib/session';
 
 function icsDate(d: Date): string {
   return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
@@ -26,12 +26,12 @@ function fold(line: string): string {
 
 export const GET: APIRoute = async ({ params, cookies, redirect, url }) => {
   const event = await getEventBySlug(params.slug ?? '');
-  const session = getGuestSession(cookies);
-  if (!event || session?.eventId !== event.id) return redirect(`/e/${params.slug}`);
+  const guest = event ? await currentGuest(cookies, event) : null;
+  if (!event || !guest) return redirect(`/e/${params.slug}`);
 
   const end = event.ends_at ?? new Date(event.starts_at.getTime() + 3 * 3600e3);
   const location = [event.venue, event.address.replace(/\n/g, ', ')].filter(Boolean).join(', ');
-  const link = `${url.origin}/e/${event.slug}`;
+  const link = `${url.origin}/i/${guest.invite_token}`;
 
   const lines = [
     'BEGIN:VCALENDAR',

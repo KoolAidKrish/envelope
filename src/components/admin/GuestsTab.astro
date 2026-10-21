@@ -11,16 +11,20 @@ const { event, guests, origin } = Astro.props;
 const now = new Date();
 const rsvpWord = { yes: 'Going', maybe: 'Maybe', no: 'Can’t make it', pending: 'No reply' } as const;
 
-function inviteFor(g: GuestRow) {
-  const link = `${origin}/e/${event.slug}?n=${encodeURIComponent(g.name)}`;
+// Everything per guest is worked out here, keeping comparisons out of the template.
+const rows = guests.map((g) => {
   const first = g.name.split(/\s+/)[0];
+  const link = `${origin}/i/${g.invite_token}`;
   return {
+    g,
+    first,
     link,
     message:
       `Hi ${first}! You're invited to ${event.title}. Your invitation is here: ${link}\n\n` +
-      `It'll ask you a question only you and I know the answer to.`,
+      `It's just for you, so please don't forward it. It'll ask you a question only you and I know the answer to.`,
+    locked: !!g.locked_until && g.locked_until.getTime() > now.getTime(),
   };
-}
+});
 ---
 
 <div class="grid-sidebar">
@@ -37,10 +41,7 @@ function inviteFor(g: GuestRow) {
         </div>
       ) : (
         <ul class="rows">
-          {guests.map((g) => {
-            const invite = inviteFor(g);
-            const locked = g.locked_until && g.locked_until > now;
-            return (
+          {rows.map(({ g, first, link, message, locked }) => (
               <li class="row">
                 <div class="row-main">
                   <div>
@@ -61,17 +62,28 @@ function inviteFor(g: GuestRow) {
                     {g.rsvp_note && <p class="quote">{g.rsvp_note}</p>}
                   </div>
                   <div class="row-actions">
-                    <button class="btn btn-small" type="button" data-copy={invite.message}>
+                    <button class="btn btn-small" type="button" data-copy={message}>
                       Copy invite
                     </button>
-                    <button class="btn-link" type="button" data-copy={invite.link}>
+                    <button class="btn-link" type="button" data-copy={link}>
                       Copy link
                     </button>
                     <form method="post" class="inline">
                       <input type="hidden" name="action" value="view_as_guest" />
                       <input type="hidden" name="guest" value={g.id} />
                       <button class="btn-link" type="submit">
-                        View as {g.name.split(/\s+/)[0]}
+                        View as {first}
+                      </button>
+                    </form>
+                    <form
+                      method="post"
+                      class="inline"
+                      data-confirm={`Make a new link for ${g.name}? Their current link stops working and they’ll be signed out.`}
+                    >
+                      <input type="hidden" name="action" value="new_link" />
+                      <input type="hidden" name="guest" value={g.id} />
+                      <button class="btn-link" type="submit">
+                        New link
                       </button>
                     </form>
                     {locked && (
@@ -134,8 +146,7 @@ function inviteFor(g: GuestRow) {
                   </form>
                 </details>
               </li>
-            );
-          })}
+          ))}
         </ul>
       )
     }
@@ -149,7 +160,7 @@ function inviteFor(g: GuestRow) {
         <label class="field">
           <span>Name</span>
           <input type="text" name="name" required maxlength="120" placeholder="Priya Shah" />
-          <small>This is what they type to sign in. A unique first name works too.</small>
+          <small>Shown on their invitation. Each guest gets a private link; nobody types their name.</small>
         </label>
         <label class="field">
           <span>Their question</span>

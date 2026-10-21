@@ -1,0 +1,89 @@
+---
+// A guest's private invite link. The token picks the guest; their answer signs them in.
+import GuestLayout from '../../layouts/GuestLayout.astro';
+import Envelope from '../../components/Envelope.astro';
+import NotFound from '../../components/NotFound.astro';
+import { getGuestByToken, getEventById, recordLoginFailure, recordLoginSuccess, MAX_ATTEMPTS, LOCK_MINUTES } from '../../lib/queries';
+import { checkAnswer, setGuestSession, isSecure } from '../../lib/auth';
+import { currentGuest } from '../../lib/session';
+import { str } from '../../lib/form';
+
+const token = Astro.params.token ?? '';
+const guest = await getGuestByToken(token);
+const event = guest ? await getEventById(guest.event_id) : null;
+
+let error = '';
+
+if (guest && event) {
+  const signedIn = await currentGuest(Astro.cookies, event);
+  if (signedIn?.id === guest.id) return Astro.redirect(`/e/${event.slug}/home`);
+
+  const host = event.host_name || 'your host';
+  const lockedFor = (until: Date | null) => (until && until > new Date() ? Math.ceil((until.getTime() - Date.now()) / 60000) : 0);
+
+  if (Astro.request.method === 'POST') {
+    const form = await Astro.request.formData();
+    const wait = lockedFor(guest.locked_until);
+    if (wait) {
+      error = `Too many wrong answers. Try again in ${wait} minute${wait === 1 ? '' : 's'}, or ask ${host} for a hint.`;
+    } else if (await checkAnswer(str(form, 'answer', 300), guest.answer_hash)) {
+      await recordLoginSuccess(guest.id);
+      setGuestSession(Astro.cookies, guest, isSecure(Astro.url));
+      return Astro.redirect(`/e/${event.slug}/home?opened=1`);
+    } else {
+      const locked = await recordLoginFailure(guest.id);
+      const left = MAX_ATTEMPTS - (guest.failed_attempts + 1);
+      error = locked
+        ? `Too many wrong answers. Try again in ${LOCK_MINUTES} minutes, or ask ${host} for a hint.`
+        : `That's not it. Capitals and punctuation don't matter. ${left} ${left === 1 ? 'try' : 'tries'} left.`;
+    }
+  }
+}
+
+if (!guest || !event) Astro.response.status = 404;
+
+const firstName = guest?.name.split(/\s+/)[0] ?? '';
+const questionWords = guest?.question.split(/\s+/).filter(Boolean) ?? [];
+const monogram = (event?.title.match(/[\p{L}\p{N}]/u)?.[0] ?? '✶').toUpperCase();
+---
+
+{
+  !guest || !event ? (
+    <NotFound message="This invitation link isn't valid. Your host may have sent you a newer one, so check your messages or ask them for it again." />
+  ) : (
+    <GuestLayout title={`${event.title} | Invitation`} theme={event.theme}>
+      <main class="gate">
+        <div class="gate-inner">
+          <Envelope monogram={monogram} wiggle={!!error} enter={!error} />
+          <div class="gate-heading">
+            <p>
+              {firstName}, you're invited to <strong>{event.title}</strong>. Answer this to open it.
+            </p>
+            <p class="gate-question">
+              {questionWords.map((word, i) => (
+                <Fragment>
+                  <span class="word" style={`--i:${i}`}>{word}</span>{' '}
+                </Fragment>
+              ))}
+            </p>
+          </div>
+          <form class:list={['gate-form', { 'has-error': error }]} method="post">
+            <label class="field">
+              <span>Your answer</span>
+              <input type="text" name="answer" autocomplete="off" autocapitalize="off" spellcheck="false" required autofocus />
+            </label>
+            {error && (
+              <p class="gate-error" role="alert">
+                {error}
+              </p>
+            )}
+            <button class="btn" type="submit" data-busy="Breaking the seal">
+              Open invitation
+            </button>
+          </form>
+          <p class="gate-foot">Not {firstName}? This link was sent to them. Ask the host for your own.</p>
+        </div>
+      </main>
+    </GuestLayout>
+  )
+}

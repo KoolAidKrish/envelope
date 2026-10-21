@@ -1,138 +1,23 @@
 ---
+// The shared event address. Guests sign in through their private /i/<token>
+// link, so this page takes no names and says nothing about the event.
 import GuestLayout from '../../../layouts/GuestLayout.astro';
 import Envelope from '../../../components/Envelope.astro';
-import NotFound from '../../../components/NotFound.astro';
-import {
-  getEventBySlug,
-  findGuestByName,
-  recordLoginFailure,
-  recordLoginSuccess,
-  MAX_ATTEMPTS,
-  LOCK_MINUTES,
-  type GuestRow,
-} from '../../../lib/queries';
-import { checkAnswer, getGuestSession, setGuestSession, isSecure } from '../../../lib/auth';
-import { str } from '../../../lib/form';
+import { getEventBySlug } from '../../../lib/queries';
+import { currentGuest } from '../../../lib/session';
 
 const event = await getEventBySlug(Astro.params.slug ?? '');
-if (!event) Astro.response.status = 404;
-
-const host = event?.host_name || 'your host';
-let step: 'name' | 'answer' = 'name';
-let guest: GuestRow | null = null;
-let error = '';
-let typedName = Astro.url.searchParams.get('n')?.slice(0, 120) ?? '';
-
-if (event && Astro.request.method === 'GET') {
-  const session = getGuestSession(Astro.cookies);
-  if (session?.eventId === event.id) return Astro.redirect(`/e/${event.slug}/home`);
-}
-
-if (event && Astro.request.method === 'POST') {
-  const form = await Astro.request.formData();
-  typedName = str(form, 'name', 120);
-  const found = await findGuestByName(event.id, typedName);
-
-  if (found === 'ambiguous') {
-    error = 'More than one guest has that first name. Type your full name, the way it was written on your invitation.';
-  } else if (!found) {
-    error = `That name isn't on the guest list. Check the spelling, or try your full name as ${host} would write it.`;
-  } else if (found.locked_until && found.locked_until > new Date()) {
-    guest = found;
-    step = 'answer';
-    const mins = Math.ceil((found.locked_until.getTime() - Date.now()) / 60000);
-    error = `Too many wrong answers. Try again in ${mins} minute${mins === 1 ? '' : 's'}, or ask ${host} for a hint.`;
-  } else if (str(form, 'step') !== 'answer') {
-    guest = found;
-    step = 'answer';
-  } else {
-    guest = found;
-    step = 'answer';
-    if (await checkAnswer(str(form, 'answer', 300), found.answer_hash)) {
-      await recordLoginSuccess(found.id);
-      setGuestSession(Astro.cookies, { guestId: found.id, eventId: event.id }, isSecure(Astro.url));
-      return Astro.redirect(`/e/${event.slug}/home?opened=1`);
-    }
-    const locked = await recordLoginFailure(found.id);
-    const left = MAX_ATTEMPTS - (found.failed_attempts + 1);
-    error = locked
-      ? `Too many wrong answers. Try again in ${LOCK_MINUTES} minutes, or ask ${host} for a hint.`
-      : `That's not it. Capitals and punctuation don't matter. ${left} ${left === 1 ? 'try' : 'tries'} left.`;
-  }
-}
-
-const firstName = guest?.name.split(/\s+/)[0] ?? '';
-const questionWords = guest?.question.split(/\s+/).filter(Boolean) ?? [];
-const monogram = (event?.title.match(/[\p{L}\p{N}]/u)?.[0] ?? '✶').toUpperCase();
+if (event && (await currentGuest(Astro.cookies, event))) return Astro.redirect(`/e/${event.slug}/home`);
 ---
 
-{
-  !event ? (
-    <NotFound />
-  ) : (
-    <GuestLayout title={`${event.title} | Invitation`} theme={event.theme}>
-      <main class="gate">
-        <div class="gate-inner">
-          <Envelope monogram={monogram} wiggle={!!error && step === 'answer'} enter={!error} />
-
-          {step === 'name' ? (
-            <>
-              <div class="gate-heading">
-                <p>You're invited to</p>
-                <h1>{event.title}</h1>
-                {event.host_name && <p>Hosted by {event.host_name}</p>}
-              </div>
-              <form class:list={['gate-form', { 'has-error': error }]} method="post">
-                <input type="hidden" name="step" value="name" />
-                <label class="field">
-                  <span>Your name</span>
-                  <input
-                    type="text"
-                    name="name"
-                    value={typedName}
-                    autocomplete="name"
-                    autocapitalize="words"
-                    required
-                    autofocus
-                  />
-                </label>
-                {error && <p class="gate-error" role="alert">{error}</p>}
-                <button class="btn" type="submit" data-busy="Looking you up">
-                  Continue
-                </button>
-              </form>
-            </>
-          ) : (
-            <>
-              <div class="gate-heading">
-                <p>Hi {firstName}. Answer this to open your invitation.</p>
-                <p class="gate-question">
-                  {questionWords.map((word, i) => (
-                    <Fragment>
-                      <span class="word" style={`--i:${i}`}>{word}</span>{' '}
-                    </Fragment>
-                  ))}
-                </p>
-              </div>
-              <form class:list={['gate-form', { 'has-error': error }]} method="post">
-                <input type="hidden" name="step" value="answer" />
-                <input type="hidden" name="name" value={guest!.name} />
-                <label class="field">
-                  <span>Your answer</span>
-                  <input type="text" name="answer" autocomplete="off" autocapitalize="off" spellcheck="false" required autofocus />
-                </label>
-                {error && <p class="gate-error" role="alert">{error}</p>}
-                <button class="btn" type="submit" data-busy="Breaking the seal">
-                  Open invitation
-                </button>
-              </form>
-              <p class="gate-foot">
-                Not {firstName}? <a href={`/e/${event.slug}`}>Start over</a>
-              </p>
-            </>
-          )}
-        </div>
-      </main>
-    </GuestLayout>
-  )
-}
+<GuestLayout title="Invitation" theme={event?.theme}>
+  <main class="gate">
+    <div class="gate-inner">
+      <Envelope monogram="✶" enter />
+      <div class="gate-heading">
+        <h1>Invitations here are personal</h1>
+        <p>Open the link your host sent you. If you can't find it, ask them to send it again.</p>
+      </div>
+    </div>
+  </main>
+</GuestLayout>

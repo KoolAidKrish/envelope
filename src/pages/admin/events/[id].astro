@@ -125,8 +125,15 @@ if (Astro.request.method === 'POST') {
       const id = uuid(form, 'guest');
       const guest = id ? await q.getGuest(id, event.id) : null;
       if (!guest) return go('guests', 'That guest no longer exists.', true);
-      setGuestSession(Astro.cookies, { guestId: guest.id, eventId: event.id }, isSecure(Astro.url));
+      setGuestSession(Astro.cookies, guest, isSecure(Astro.url));
       return Astro.redirect(`/e/${event.slug}/home`);
+    }
+    case 'new_link': {
+      const id = uuid(form, 'guest');
+      const guest = id ? await q.getGuest(id, event.id) : null;
+      if (!guest) return go('guests', 'That guest no longer exists.', true);
+      await q.regenerateInviteToken(event.id, guest.id);
+      return go('guests', `${guest.name} has a new link. The old one no longer works, and they’ve been signed out. Send them the new invite.`);
     }
 
     // ----- Bring -----
@@ -196,7 +203,6 @@ const [stats, guests, posts] = await Promise.all([q.eventStats(event.id), q.list
 const unanswered = posts.filter((p) => !p.reply).length;
 const bring = tab === 'bring' ? await q.listBring(event.id) : [];
 const registry = tab === 'registry' ? await q.listRegistry(event.id, null) : [];
-const shareUrl = `${Astro.url.origin}/e/${event.slug}`;
 
 const labels: Record<Tab, string> = {
   overview: 'Overview',
@@ -214,10 +220,7 @@ const labels: Record<Tab, string> = {
       <h1>{event.title}</h1>
       <p class="meta">{shortDate(event.starts_at, event.timezone)}{event.venue && `, ${event.venue}`}</p>
     </div>
-    <div class="form-actions">
-      <button class="btn btn-secondary" type="button" data-copy={shareUrl}>Copy link</button>
-      <a class="btn btn-secondary" href={`/e/${event.slug}`} target="_blank" rel="noopener">Open guest page</a>
-    </div>
+    <a class="btn btn-secondary" href={`/admin/events/${event.id}?tab=guests`}>Send invites</a>
   </div>
 
   <nav class="tabs" aria-label="Event sections">
@@ -232,7 +235,7 @@ const labels: Record<Tab, string> = {
     }
   </nav>
 
-  {tab === 'overview' && <OverviewTab event={event} stats={stats} guests={guests} posts={posts} shareUrl={shareUrl} />}
+  {tab === 'overview' && <OverviewTab event={event} stats={stats} guests={guests} posts={posts} />}
   {
     tab === 'details' && (
       <>

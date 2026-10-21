@@ -6,6 +6,7 @@ interface Props {
   items: RegistryRow[];
 }
 const { event, items } = Astro.props;
+
 // Badge state per gift, computed here so the template has no `<` comparisons.
 const claimBadge = (item: RegistryRow) => {
   if (item.claimed === 0) return { yes: false, maybe: false };

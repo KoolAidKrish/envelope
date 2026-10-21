@@ -1,6 +1,13 @@
 ---
 import GuestLayout from '../layouts/GuestLayout.astro';
 import Envelope from './Envelope.astro';
+
+interface Props {
+  message?: string;
+}
+const {
+  message = "This link doesn't match any invitation. Check the link your host sent you, or ask them for a new one.",
+} = Astro.props;
 ---
 
 <GuestLayout title="Invitation not found">
@@ -9,7 +16,7 @@ import Envelope from './Envelope.astro';
       <Envelope monogram="?" enter />
       <div class="gate-heading">
         <h1>No invitation here</h1>
-        <p>This link doesn't match any event. Check the link your host sent you, or ask them for a new one.</p>
+        <p>{message}</p>
       </div>
     </div>
   </main>

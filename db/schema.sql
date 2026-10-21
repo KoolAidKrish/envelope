@@ -83,6 +83,14 @@ create table if not exists envelope.posts (
   created_at  timestamptz not null default now()
 );
 
+-- Each guest's private invite link is /i/<invite_token>. 122 random bits from
+-- gen_random_uuid() (built into Postgres 13+). Existing guests get one too.
+alter table envelope.guests add column if not exists invite_token text;
+alter table envelope.guests alter column invite_token set default replace(gen_random_uuid()::text, '-', '');
+update envelope.guests set invite_token = replace(gen_random_uuid()::text, '-', '') where invite_token is null;
+alter table envelope.guests alter column invite_token set not null;
+create unique index if not exists guests_invite_token_idx on envelope.guests (invite_token);
+
 create index if not exists guests_event_idx   on envelope.guests (event_id);
 create index if not exists bring_event_idx    on envelope.bring_items (event_id);
 create index if not exists registry_event_idx on envelope.registry_items (event_id);

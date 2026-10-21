@@ -41,6 +41,7 @@ export type GuestRow = {
   failed_attempts: number;
   locked_until: Date | null;
   last_seen_at: Date | null;
+  invite_token: string;
   created_at: Date;
 };
 
@@ -166,18 +167,20 @@ export async function eventStats(eventId: string) {
 
 // ---------- Guests ----------
 
-/** Finds the guest a visitor is trying to sign in as. Accepts a first name when it's unique. */
-export async function findGuestByName(eventId: string, typed: string): Promise<GuestRow | 'ambiguous' | null> {
-  const key = nameKey(typed);
-  if (!key) return null;
+/** Finds the guest a private invite link belongs to. */
+export async function getGuestByToken(token: string): Promise<GuestRow | null> {
+  if (!/^[0-9a-f]{32}$/.test(token)) return null;
   const sql = await db();
-  const [exact] = await sql<GuestRow[]>`select * from envelope.guests where event_id = ${eventId} and name_key = ${key}`;
-  if (exact) return exact;
-  const partial = await sql<GuestRow[]>`
-    select * from envelope.guests
-    where event_id = ${eventId} and name_key like ${escapeLike(key) + ' %'} limit 2`;
-  if (partial.length === 1) return partial[0];
-  return partial.length > 1 ? 'ambiguous' : null;
+  const [row] = await sql<GuestRow[]>`select * from envelope.guests where invite_token = ${token}`;
+  return row ?? null;
+}
+
+/** Replaces a guest's invite link. The old link and its sessions stop working. */
+export async function regenerateInviteToken(eventId: string, guestId: string): Promise<void> {
+  const sql = await db();
+  await sql`update envelope.guests set invite_token = replace(gen_random_uuid()::text, '-', ''),
+      failed_attempts = 0, locked_until = null
+    where id = ${guestId} and event_id = ${eventId}`;
 }
 
 export async function getGuest(id: string, eventId: string): Promise<GuestRow | null> {
@@ -413,8 +416,4 @@ export async function deletePost(eventId: string, postId: string): Promise<void>
 
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
-
-function escapeLike(text: string): string {
-  return text.replace(/[\\%_]/g, (c) => '\\' + c);
 }

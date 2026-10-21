@@ -48,7 +48,15 @@ export function checkAdminPassword(input: string): boolean {
 
 // ---------- Signed session cookies ----------
 
-export type GuestSession = { guestId: string; eventId: string };
+/**
+ * `tag` is a fingerprint of the guest's invite token at sign-in. Making a new
+ * link changes the token, so every session from the old link stops working.
+ */
+export type GuestSession = { guestId: string; eventId: string; tag: string };
+
+export function tokenTag(inviteToken: string): string {
+  return createHmac('sha256', 'envelope-invite').update(inviteToken).digest('base64url').slice(0, 16);
+}
 
 const GUEST_COOKIE = 'envelope_guest';
 const ADMIN_COOKIE = 'envelope_admin';
@@ -86,7 +94,12 @@ function cookieOptions(days: number, secure: boolean) {
   return { path: '/', httpOnly: true, sameSite: 'lax' as const, secure, maxAge: days * 86400 };
 }
 
-export function setGuestSession(cookies: AstroCookies, s: GuestSession, secure: boolean) {
+export function setGuestSession(
+  cookies: AstroCookies,
+  guest: { id: string; event_id: string; invite_token: string },
+  secure: boolean,
+) {
+  const s: GuestSession = { guestId: guest.id, eventId: guest.event_id, tag: tokenTag(guest.invite_token) };
   cookies.set(GUEST_COOKIE, sign({ ...s, exp: Date.now() + GUEST_DAYS * 86400e3 }), cookieOptions(GUEST_DAYS, secure));
 }
 
