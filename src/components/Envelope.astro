@@ -1,0 +1,20 @@
+---
+interface Props {
+  monogram: string;
+  wiggle?: boolean;
+  /** Drop in from above on page load. */
+  enter?: boolean;
+}
+const { monogram, wiggle = false, enter = false } = Astro.props;
+---
+
+<div class:list={['envelope', { wiggle, enter }]} data-envelope aria-hidden="true">
+  <div class="env-shadow"></div>
+  <div class="env-body">
+    <div class="env-inside"></div>
+    <div class="env-card"><span class="env-card-lines"></span></div>
+    <div class="env-front"></div>
+    <div class="env-flap"></div>
+    <div class="env-seal"><span>{monogram}</span></div>
+  </div>
+</div>

@@ -1,0 +1,95 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { isAdmin, checkAdminPassword, setAdminSession, isSecure } from '../../lib/auth';
+import { listEvents } from '../../lib/queries';
+import { takeFlash } from '../../lib/flash';
+import { str } from '../../lib/form';
+
+let loginError = '';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  if (checkAdminPassword(str(form, 'password', 500))) {
+    setAdminSession(Astro.cookies, isSecure(Astro.url));
+    return Astro.redirect('/admin');
+  }
+  await new Promise((r) => setTimeout(r, 800)); // slow down guessing
+  loginError = 'That password doesn’t match ADMIN_PASSWORD.';
+  Astro.response.status = 401;
+}
+
+const authed = isAdmin(Astro.cookies);
+const events = authed ? await listEvents() : [];
+const flash = authed ? takeFlash(Astro.cookies) : null;
+const now = Date.now();
+const isPast = (d: Date) => d.getTime() + 86400e3 <= now;
+
+const day = (d: Date, tz: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, day: 'numeric' }).format(d);
+const mon = (d: Date, tz: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'short' }).format(d);
+const long = (d: Date, tz: string) =>
+  new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d);
+---
+
+{
+  !authed ? (
+    <AdminLayout title="Sign in" bare>
+      <main class="login">
+        <form method="post" class="panel">
+          <span class="wordmark">Envelope</span>
+          <label class="field">
+            <span>Host password</span>
+            <input type="password" name="password" autocomplete="current-password" required autofocus />
+          </label>
+          {loginError && <p class="errors" role="alert">{loginError}</p>}
+          <button class="btn" type="submit">Sign in</button>
+        </form>
+      </main>
+    </AdminLayout>
+  ) : (
+    <AdminLayout title="Events" flash={flash}>
+      <div class="page-head">
+        <div>
+          <h1>Your events</h1>
+          <p class="meta">{events.length === 0 ? 'Nothing planned yet.' : `${events.length} event${events.length === 1 ? '' : 's'}`}</p>
+        </div>
+        <a class="btn" href="/admin/events/new">New event</a>
+      </div>
+
+      {events.length === 0 ? (
+        <div class="panel empty-state">
+          <strong>Create your first event</strong>
+          Add the date and place, then your guests and their questions. Each guest gets their own sign-in.
+          <p style="margin-top:16px">
+            <a class="btn" href="/admin/events/new">New event</a>
+          </p>
+        </div>
+      ) : (
+        <ul class="event-list">
+          {events.map((e) => (
+            <li class:list={['event-item', { past: isPast(e.starts_at) }]}>
+              <a href={`/admin/events/${e.id}`}>
+                <span class="event-date">
+                  <b>{day(e.starts_at, e.timezone)}</b>
+                  <span>{mon(e.starts_at, e.timezone)}</span>
+                </span>
+                <span>
+                  <span class="event-title">{e.title}</span>
+                  <span class="row-sub" style="display:block">
+                    {long(e.starts_at, e.timezone)}
+                    {e.venue && `, ${e.venue}`}
+                  </span>
+                </span>
+                <span class="event-figures">
+                  <span class="badge yes">{e.headcount} coming</span>
+                  {e.pending > 0 && <span class="badge">{e.pending} no reply</span>}
+                  {e.unanswered > 0 && <span class="badge no">{e.unanswered} unanswered</span>}
+                  {e.invited === 0 && <span class="badge accent">No guests yet</span>}
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </AdminLayout>
+  )
+}

@@ -1,0 +1,35 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import EventForm from '../../../components/admin/EventForm.astro';
+import { isAdmin } from '../../../lib/auth';
+import { createEvent, uniqueSlug } from '../../../lib/queries';
+import { parseEventForm } from '../../../lib/eventForm';
+import { setFlash } from '../../../lib/flash';
+
+if (!isAdmin(Astro.cookies)) return Astro.redirect('/admin');
+
+let values: Record<string, unknown> = { theme: 'midnight' };
+let errors: string[] = [];
+
+if (Astro.request.method === 'POST') {
+  const { data, errors: problems } = parseEventForm(await Astro.request.formData());
+  if (problems.length === 0) {
+    const event = await createEvent({ ...data, slug: await uniqueSlug(data.title) });
+    setFlash(Astro.cookies, 'Event created. Add your guests next.');
+    return Astro.redirect(`/admin/events/${event.id}?tab=guests`);
+  }
+  values = data;
+  errors = problems;
+  Astro.response.status = 400;
+}
+---
+
+<AdminLayout title="New event">
+  <div class="page-head">
+    <div>
+      <h1>New event</h1>
+      <p class="meta">You can change any of this later.</p>
+    </div>
+  </div>
+  <EventForm values={values} errors={errors} submitLabel="Create event" origin={Astro.url.origin} />
+</AdminLayout>

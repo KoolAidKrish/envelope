@@ -1,0 +1,110 @@
+---
+import '../styles/admin.css';
+import { adminFontsHref } from '../lib/themes';
+import type { Flash } from '../lib/flash';
+
+interface Props {
+  title: string;
+  flash?: Flash | null;
+  bare?: boolean;
+}
+const { title, flash, bare = false } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>{title} | Envelope</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href={adminFontsHref()} />
+  </head>
+  <body>
+    {
+      bare ? (
+        <slot />
+      ) : (
+        <>
+          <header class="shell-head">
+            <div class="shell-head-inner">
+              <a class="wordmark" href="/admin">
+                <svg viewBox="0 0 64 64" aria-hidden="true">
+                  <rect x="4" y="14" width="56" height="38" rx="5" fill="#f2f3f7" />
+                  <path d="M4 18 L32 38 L60 18" fill="none" stroke="#161a2e" stroke-width="4" stroke-linejoin="round" />
+                  <circle cx="32" cy="38" r="9" fill="#c9a24a" />
+                </svg>
+                Envelope
+              </a>
+              <nav>
+                <a href="/admin">Events</a>
+                <form method="post" action="/admin/logout" class="inline">
+                  <button type="submit">Sign out</button>
+                </form>
+              </nav>
+            </div>
+          </header>
+          <main class="page">
+            {flash && (
+              <p class:list={['flash', { error: flash.error }]} role="status">
+                {flash.text}
+              </p>
+            )}
+            <slot />
+          </main>
+        </>
+      )
+    }
+
+    <script>
+      // Buttons with data-copy put text on the clipboard.
+      document.addEventListener('click', async (e) => {
+        const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-copy]');
+        if (!btn) return;
+        e.preventDefault();
+        const label = btn.textContent;
+        try {
+          await navigator.clipboard.writeText(btn.dataset.copy!);
+          btn.textContent = 'Copied';
+          btn.classList.add('copied');
+        } catch {
+          btn.textContent = 'Copy failed';
+        }
+        setTimeout(() => {
+          btn.textContent = label;
+          btn.classList.remove('copied');
+        }, 1600);
+      });
+
+      // Headline numbers count up from zero.
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        document.querySelectorAll<HTMLElement>('.stat b').forEach((el) => {
+          const text = el.textContent ?? '';
+          if (!/\d/.test(text)) return;
+          const start = performance.now();
+          const step = (now: number) => {
+            const k = Math.min(1, (now - start) / 700);
+            const eased = 1 - (1 - k) ** 3;
+            el.textContent = text.replace(/\d+/g, (n) => String(Math.round(Number(n) * eased)));
+            if (k < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        });
+      }
+
+      // Forms with data-confirm ask first.
+      document.addEventListener('submit', (e) => {
+        const form = e.target as HTMLFormElement;
+        if (form.dataset.confirm && !confirm(form.dataset.confirm)) e.preventDefault();
+      });
+
+      // Fill an empty time zone field with this browser's zone.
+      document.querySelectorAll<HTMLInputElement>('input[data-default-tz]').forEach((input) => {
+        if (!input.value) input.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      });
+    </script>
+  </body>
+</html>

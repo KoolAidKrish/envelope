@@ -1,0 +1,16 @@
+---
+import GuestLayout from '../layouts/GuestLayout.astro';
+import Envelope from './Envelope.astro';
+---
+
+<GuestLayout title="Invitation not found">
+  <main class="gate">
+    <div class="gate-inner">
+      <Envelope monogram="?" enter />
+      <div class="gate-heading">
+        <h1>No invitation here</h1>
+        <p>This link doesn't match any event. Check the link your host sent you, or ask them for a new one.</p>
+      </div>
+    </div>
+  </main>
+</GuestLayout>

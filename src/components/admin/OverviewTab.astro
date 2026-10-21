@@ -1,0 +1,142 @@
+---
+import type { EventRow, GuestRow, PostRow } from '../../lib/queries';
+import { timeAgo } from '../../lib/time';
+
+interface Props {
+  event: EventRow;
+  stats: { invited: number; yes: number; maybe: number; no: number; pending: number; headcount: number; seen: number };
+  guests: GuestRow[];
+  posts: PostRow[];
+  shareUrl: string;
+}
+const { event, stats, guests, posts, shareUrl } = Astro.props;
+const base = `/admin/events/${event.id}`;
+const unanswered = posts.filter((p) => !p.reply).slice(0, 5);
+const notes = guests.filter((g) => g.rsvp_note && g.rsvp !== 'no');
+const recent = guests
+  .filter((g) => g.rsvp_at)
+  .sort((a, b) => b.rsvp_at!.getTime() - a.rsvp_at!.getTime())
+  .slice(0, 6);
+const rsvpWord = { yes: 'Going', maybe: 'Maybe', no: 'Can’t make it', pending: 'No reply' } as const;
+---
+
+{
+  stats.invited === 0 ? (
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Get it ready to send</h2>
+      </div>
+      <ol class="rows" style="list-style:decimal; padding-left:20px">
+        <li class="row">
+          <a href={`${base}?tab=guests`}>Add your guests</a>
+          <p class="row-sub">Each one gets a question only they can answer. That’s their password.</p>
+        </li>
+        <li class="row">
+          <a href={`${base}?tab=bring`}>List what to bring</a>
+          <p class="row-sub">For everyone, or for specific people. Skip it if there’s nothing.</p>
+        </li>
+        <li class="row">
+          <a href={`${base}?tab=registry`}>Add gifts</a>
+          <p class="row-sub">Optional. Guests claim items so nobody doubles up.</p>
+        </li>
+        <li class="row">
+          <p>Send each guest their invite from the Guests tab.</p>
+        </li>
+      </ol>
+    </div>
+  ) : (
+    <>
+      <div class="stats">
+        <div class="stat"><b>{stats.headcount}</b><span>People coming</span></div>
+        <div class="stat"><b>{stats.yes}</b><span>Said yes</span></div>
+        <div class="stat"><b>{stats.maybe}</b><span>Maybe</span></div>
+        <div class="stat"><b>{stats.no}</b><span>Can’t make it</span></div>
+        <div class="stat"><b>{stats.pending}</b><span>No reply yet</span></div>
+        <div class="stat"><b>{stats.seen} of {stats.invited}</b><span>Opened invitation</span></div>
+      </div>
+
+      <div class="grid-sidebar">
+        <div>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Waiting on you</h2>
+              {unanswered.length > 0 && <a href={`${base}?tab=questions`}>Answer questions</a>}
+            </div>
+            {unanswered.length === 0 ? (
+              <p class="muted">No unanswered questions.</p>
+            ) : (
+              <ul class="rows">
+                {unanswered.map((p) => (
+                  <li class="row">
+                    <p class="row-title">{p.guest_name}</p>
+                    <p class="quote">{p.body}</p>
+                    <p class="row-sub">{timeAgo(p.created_at)}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Notes from guests</h2>
+            </div>
+            {notes.length === 0 ? (
+              <p class="muted">When guests mention allergies or plans in their RSVP, they show up here.</p>
+            ) : (
+              <ul class="rows">
+                {notes.map((g) => (
+                  <li class="row">
+                    <p class="row-title">
+                      {g.name} <span class:list={['badge', g.rsvp]}>{rsvpWord[g.rsvp]}</span>
+                    </p>
+                    <p class="quote">{g.rsvp_note}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Invitation link</h2>
+            </div>
+            <div class="share">
+              <input type="text" value={shareUrl} readonly aria-label="Invitation link" />
+              <button class="btn btn-secondary" type="button" data-copy={shareUrl}>Copy</button>
+            </div>
+            <p class="hint" style="margin-top:8px">
+              Everyone uses the same link and signs in with their own name. The Guests tab has personal invites with the name filled in.
+            </p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Latest RSVPs</h2>
+            </div>
+            {recent.length === 0 ? (
+              <p class="muted">Nobody has replied yet.</p>
+            ) : (
+              <ul class="rows">
+                {recent.map((g) => (
+                  <li class="row">
+                    <div class="row-main">
+                      <span class="row-title">{g.name}</span>
+                      <span class:list={['badge', g.rsvp]}>
+                        {rsvpWord[g.rsvp]}
+                        {g.rsvp === 'yes' && g.plus_ones > 0 && ` +${g.plus_ones}`}
+                      </span>
+                    </div>
+                    <p class="row-sub">{timeAgo(g.rsvp_at!)}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}

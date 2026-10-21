@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# These are filled in on the "Deploy to Netlify" screen.
+[template.environment]
+  DATABASE_URL = "Supabase connection string (Project Settings > Database > Connection string > Transaction pooler)"
+  ADMIN_PASSWORD = "The password you'll use to sign in at /admin (make it long)"
+  SESSION_SECRET = "Any random string of 32+ characters"

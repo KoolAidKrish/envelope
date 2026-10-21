@@ -1,0 +1,158 @@
+---
+import { THEMES } from '../../lib/themes';
+import { dateToLocalInput } from '../../lib/time';
+
+interface Values {
+  slug?: string;
+  title?: string;
+  host_name?: string;
+  tagline?: string;
+  starts_at?: Date | null;
+  ends_at?: Date | null;
+  timezone?: string;
+  venue?: string;
+  address?: string;
+  map_url?: string;
+  dress_code?: string;
+  details?: string;
+  theme?: string;
+  host_sees_claims?: boolean;
+}
+
+interface Props {
+  values: Values;
+  errors?: string[];
+  submitLabel: string;
+  showSlug?: boolean;
+  origin: string;
+}
+
+const { values: v, errors = [], submitLabel, showSlug = false, origin } = Astro.props;
+const tz = v.timezone ?? '';
+let zones: string[] = [];
+try {
+  zones = (Intl as unknown as { supportedValuesOf(k: string): string[] }).supportedValuesOf('timeZone');
+} catch {}
+---
+
+<form method="post" class="form">
+  <input type="hidden" name="action" value="save_event" />
+  {
+    errors.length > 0 && (
+      <div class="errors" role="alert">
+        <strong>Fix these and save again:</strong>
+        <ul>{errors.map((e) => <li>{e}</li>)}</ul>
+      </div>
+    )
+  }
+
+  <div class="panel">
+    <div class="panel-head"><h2>The basics</h2></div>
+    <div class="form">
+      <label class="field">
+        <span>Event name</span>
+        <input type="text" name="title" value={v.title} required maxlength="120" placeholder="Krish’s 21st" />
+      </label>
+      <div class="form-row">
+        <label class="field">
+          <span>Hosted by</span>
+          <input type="text" name="host_name" value={v.host_name} maxlength="80" placeholder="Krish" />
+          <small>Guests see this name on replies and the invitation.</small>
+        </label>
+        <label class="field">
+          <span>One-line description</span>
+          <input type="text" name="tagline" value={v.tagline} maxlength="200" placeholder="Dinner, then the rooftop" />
+        </label>
+      </div>
+      {
+        showSlug && (
+          <label class="field">
+            <span>Invitation link</span>
+            <input type="text" name="slug" value={v.slug} maxlength="60" pattern="[a-z0-9\-]+" />
+            <small>
+              {origin}/e/<strong>{v.slug}</strong>. Changing this breaks links you’ve already sent.
+            </small>
+          </label>
+        )
+      }
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>When and where</h2></div>
+    <div class="form">
+      <div class="form-row">
+        <label class="field">
+          <span>Starts</span>
+          <input type="datetime-local" name="starts_at" value={dateToLocalInput(v.starts_at, tz || 'UTC')} required />
+        </label>
+        <label class="field">
+          <span>Ends <span class="muted">(optional)</span></span>
+          <input type="datetime-local" name="ends_at" value={dateToLocalInput(v.ends_at, tz || 'UTC')} />
+        </label>
+        <label class="field">
+          <span>Time zone</span>
+          <input type="text" name="timezone" value={tz} list="zones" data-default-tz required />
+          <datalist id="zones">{zones.map((z) => <option value={z} />)}</datalist>
+        </label>
+      </div>
+      <div class="form-row">
+        <label class="field">
+          <span>Venue</span>
+          <input type="text" name="venue" value={v.venue} maxlength="120" placeholder="The Common" />
+        </label>
+        <label class="field">
+          <span>Map link <span class="muted">(optional)</span></span>
+          <input type="text" name="map_url" value={v.map_url} placeholder="Leave blank to use the address" />
+        </label>
+      </div>
+      <label class="field">
+        <span>Address</span>
+        <textarea name="address" rows="2" maxlength="300" placeholder="9910 109 St NW, Edmonton">{v.address}</textarea>
+      </label>
+      <label class="field">
+        <span>Dress code <span class="muted">(optional)</span></span>
+        <input type="text" name="dress_code" value={v.dress_code} maxlength="120" placeholder="Cocktail" />
+      </label>
+      <label class="field">
+        <span>Details for guests</span>
+        <textarea name="details" rows="6" maxlength="5000" placeholder="Parking, schedule, who else is coming. Line breaks are kept.">{v.details}</textarea>
+      </label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Look and gifts</h2></div>
+    <div class="form">
+      <fieldset class="themes">
+        <legend>Theme</legend>
+        {
+          THEMES.map((t) => (
+            <div class="theme-option">
+              <input type="radio" name="theme" id={`theme-${t.id}`} value={t.id} checked={(v.theme ?? THEMES[0].id) === t.id} />
+              <label for={`theme-${t.id}`}>
+                <span class="theme-preview" style={`background:${t.swatches[0]}`}>
+                  <span class="paper" style={`background:${t.swatches[1]}`} />
+                  <span class="dot" style={`background:${t.swatches[2]}`} />
+                </span>
+                <span class="theme-name">{t.name}</span>
+                <span class="theme-mood">{t.mood}</span>
+              </label>
+            </div>
+          ))
+        }
+      </fieldset>
+      <label class="check">
+        <input type="checkbox" name="host_sees_claims" checked={v.host_sees_claims} />
+        <span>
+          Show me who claimed which gift
+          <span class="hint" style="display:block">Leave off to keep gifts a surprise. Guests always see what’s taken.</span>
+        </span>
+      </label>
+    </div>
+  </div>
+
+  <div class="form-actions">
+    <button class="btn" type="submit">{submitLabel}</button>
+  </div>
+</form>

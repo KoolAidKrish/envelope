@@ -1,0 +1,199 @@
+---
+import type { EventRow, GuestRow } from '../../lib/queries';
+import { timeAgo } from '../../lib/time';
+
+interface Props {
+  event: EventRow;
+  guests: GuestRow[];
+  origin: string;
+}
+const { event, guests, origin } = Astro.props;
+const now = new Date();
+const rsvpWord = { yes: 'Going', maybe: 'Maybe', no: 'Can’t make it', pending: 'No reply' } as const;
+
+function inviteFor(g: GuestRow) {
+  const link = `${origin}/e/${event.slug}?n=${encodeURIComponent(g.name)}`;
+  const first = g.name.split(/\s+/)[0];
+  return {
+    link,
+    message:
+      `Hi ${first}! You're invited to ${event.title}. Your invitation is here: ${link}\n\n` +
+      `It'll ask you a question only you and I know the answer to.`,
+  };
+}
+---
+
+<div class="grid-sidebar">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Guest list</h2>
+      <p>{guests.length} invited</p>
+    </div>
+    {
+      guests.length === 0 ? (
+        <div class="empty-state">
+          <strong>No guests yet</strong>
+          Add them on the right, one at a time or as a pasted list.
+        </div>
+      ) : (
+        <ul class="rows">
+          {guests.map((g) => {
+            const invite = inviteFor(g);
+            const locked = g.locked_until && g.locked_until > now;
+            return (
+              <li class="row">
+                <div class="row-main">
+                  <div>
+                    <p class="row-title">
+                      {g.name}{' '}
+                      <span class:list={['badge', g.rsvp]}>
+                        {rsvpWord[g.rsvp]}
+                        {g.rsvp !== 'no' && g.plus_ones > 0 && ` +${g.plus_ones}`}
+                      </span>
+                      {locked && <span class="badge no">Locked out</span>}
+                    </p>
+                    <p class="row-sub">
+                      Asked: {g.question}
+                      <br />
+                      {g.last_seen_at ? `Opened ${timeAgo(g.last_seen_at)}` : 'Hasn’t opened it yet'}
+                      {g.max_plus_ones > 0 && `. Can bring up to ${g.max_plus_ones}`}
+                    </p>
+                    {g.rsvp_note && <p class="quote">{g.rsvp_note}</p>}
+                  </div>
+                  <div class="row-actions">
+                    <button class="btn btn-small" type="button" data-copy={invite.message}>
+                      Copy invite
+                    </button>
+                    <button class="btn-link" type="button" data-copy={invite.link}>
+                      Copy link
+                    </button>
+                    <form method="post" class="inline">
+                      <input type="hidden" name="action" value="view_as_guest" />
+                      <input type="hidden" name="guest" value={g.id} />
+                      <button class="btn-link" type="submit">
+                        View as {g.name.split(/\s+/)[0]}
+                      </button>
+                    </form>
+                    {locked && (
+                      <form method="post" class="inline">
+                        <input type="hidden" name="action" value="unlock_guest" />
+                        <input type="hidden" name="guest" value={g.id} />
+                        <button class="btn-link" type="submit">
+                          Unlock
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                </div>
+                <details>
+                  <summary>Edit</summary>
+                  <form method="post" class="form">
+                    <input type="hidden" name="action" value="edit_guest" />
+                    <input type="hidden" name="guest" value={g.id} />
+                    <div class="form-row">
+                      <label class="field">
+                        <span>Name</span>
+                        <input type="text" name="name" value={g.name} required maxlength="120" />
+                      </label>
+                      <label class="field">
+                        <span>Plus-ones allowed</span>
+                        <select name="max_plus_ones">
+                          {Array.from({ length: 11 }, (_, n) => (
+                            <option value={n} selected={n === g.max_plus_ones}>
+                              {n === 0 ? 'None' : n}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label class="field">
+                      <span>Question</span>
+                      <input type="text" name="question" value={g.question} required maxlength="300" />
+                    </label>
+                    <label class="field">
+                      <span>New answer</span>
+                      <input type="text" name="answer" maxlength="300" autocomplete="off" placeholder="Leave blank to keep the current answer" />
+                      <small>Answers are stored scrambled, so the old one can’t be shown.</small>
+                    </label>
+                    <label class="field">
+                      <span>Personal note on their invitation</span>
+                      <textarea name="note" rows="2" maxlength="1000">{g.note}</textarea>
+                    </label>
+                    <div class="form-actions">
+                      <button class="btn btn-small" type="submit">
+                        Save guest
+                      </button>
+                    </div>
+                  </form>
+                  <form method="post" data-confirm={`Remove ${g.name}? Their RSVP, gift claims, and questions go too.`} style="margin-top:12px">
+                    <input type="hidden" name="action" value="delete_guest" />
+                    <input type="hidden" name="guest" value={g.id} />
+                    <button class="btn-link danger" type="submit">
+                      Remove {g.name}
+                    </button>
+                  </form>
+                </details>
+              </li>
+            );
+          })}
+        </ul>
+      )
+    }
+  </div>
+
+  <div>
+    <div class="panel">
+      <div class="panel-head"><h2>Add a guest</h2></div>
+      <form method="post" class="form">
+        <input type="hidden" name="action" value="add_guest" />
+        <label class="field">
+          <span>Name</span>
+          <input type="text" name="name" required maxlength="120" placeholder="Priya Shah" />
+          <small>This is what they type to sign in. A unique first name works too.</small>
+        </label>
+        <label class="field">
+          <span>Their question</span>
+          <input type="text" name="question" required maxlength="300" placeholder="What did we name the class hamster?" />
+        </label>
+        <label class="field">
+          <span>Answer</span>
+          <input type="text" name="answer" required maxlength="300" autocomplete="off" placeholder="Professor Nibbles" />
+          <small>Capitals and punctuation are ignored when they answer.</small>
+        </label>
+        <label class="field">
+          <span>Plus-ones allowed</span>
+          <select name="max_plus_ones">
+            {Array.from({ length: 11 }, (_, n) => <option value={n}>{n === 0 ? 'None' : n}</option>)}
+          </select>
+        </label>
+        <label class="field">
+          <span>Personal note <span class="muted">(optional)</span></span>
+          <textarea name="note" rows="2" maxlength="1000" placeholder="Only they see this, on their invitation."></textarea>
+        </label>
+        <div class="form-actions">
+          <button class="btn" type="submit">Add guest</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Paste a list</h2></div>
+      <form method="post" class="form">
+        <input type="hidden" name="action" value="bulk_guests" />
+        <label class="field">
+          <span>One guest per line</span>
+          <textarea
+            name="lines"
+            rows="6"
+            required
+            placeholder={'Priya Shah | First concert we went to? | Arkells\nSam Lee | My dog’s middle name? | Danger'}
+          ></textarea>
+          <small>Name | Question | Answer. Tabs work too, so you can paste three columns from a spreadsheet.</small>
+        </label>
+        <div class="form-actions">
+          <button class="btn btn-secondary" type="submit">Add all</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

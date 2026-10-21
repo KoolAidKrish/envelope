@@ -1,0 +1,22 @@
+{
+  "name": "envelope",
+  "version": "1.0.0",
+  "description": "Private, personal invitations for the events you host. Guests sign in with their name and a question only they can answer.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "db:setup": "node scripts/db-setup.mjs",
+    "db:demo": "node --env-file=.env scripts/db-demo.mjs"
+  },
+  "dependencies": {
+    "@astrojs/netlify": "^6.6.0",
+    "astro": "^5.15.0",
+    "postgres": "^3.4.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

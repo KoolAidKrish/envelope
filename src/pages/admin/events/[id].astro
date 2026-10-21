@@ -1,0 +1,259 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import EventForm from '../../../components/admin/EventForm.astro';
+import OverviewTab from '../../../components/admin/OverviewTab.astro';
+import GuestsTab from '../../../components/admin/GuestsTab.astro';
+import BringTab from '../../../components/admin/BringTab.astro';
+import RegistryTab from '../../../components/admin/RegistryTab.astro';
+import QuestionsTab from '../../../components/admin/QuestionsTab.astro';
+import { isAdmin, hashAnswer, setGuestSession, isSecure } from '../../../lib/auth';
+import * as q from '../../../lib/queries';
+import { parseEventForm } from '../../../lib/eventForm';
+import { setFlash, takeFlash } from '../../../lib/flash';
+import { str, int, uuid, safeUrl } from '../../../lib/form';
+import { shortDate } from '../../../lib/time';
+
+if (!isAdmin(Astro.cookies)) return Astro.redirect('/admin');
+
+const event = await q.getEventById(Astro.params.id ?? '');
+if (!event) {
+  setFlash(Astro.cookies, 'That event no longer exists.', true);
+  return Astro.redirect('/admin');
+}
+
+const TABS = ['overview', 'details', 'guests', 'bring', 'registry', 'questions'] as const;
+type Tab = (typeof TABS)[number];
+const requested = Astro.url.searchParams.get('tab') as Tab;
+let tab: Tab = TABS.includes(requested) ? requested : 'overview';
+
+const go = (t: Tab, message: string, error = false) => {
+  setFlash(Astro.cookies, message, error);
+  return Astro.redirect(`/admin/events/${event.id}?tab=${t}`);
+};
+
+let detailErrors: string[] = [];
+let detailValues: Record<string, unknown> = event;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = str(form, 'action', 30);
+
+  switch (action) {
+    // ----- Event -----
+    case 'save_event': {
+      const { data, errors } = parseEventForm(form);
+      if (errors.length) {
+        detailErrors = errors;
+        detailValues = data;
+        tab = 'details';
+        Astro.response.status = 400;
+        break;
+      }
+      const slug = data.slug && q.slugify(data.slug) !== event.slug ? await q.uniqueSlug(data.slug, event.id) : event.slug;
+      await q.updateEvent(event.id, { ...data, slug });
+      return go('details', 'Saved.');
+    }
+    case 'delete_event': {
+      await q.deleteEvent(event.id);
+      setFlash(Astro.cookies, `Deleted “${event.title}”.`);
+      return Astro.redirect('/admin');
+    }
+
+    // ----- Guests -----
+    case 'add_guest': {
+      const name = str(form, 'name', 120);
+      const question = str(form, 'question', 300);
+      const answer = str(form, 'answer', 300);
+      if (!name || !question || !answer) return go('guests', 'A guest needs a name, a question, and its answer.', true);
+      const result = await q.addGuest(event.id, {
+        name,
+        question,
+        answerHash: await hashAnswer(answer),
+        note: str(form, 'note', 1000),
+        maxPlusOnes: int(form, 'max_plus_ones', 0, 10),
+      });
+      return result === 'ok'
+        ? go('guests', `Added ${name}.`)
+        : go('guests', `${name} is already on the list. Give them a distinguishing name, like “${name} R.”`, true);
+    }
+    case 'bulk_guests': {
+      const lines = str(form, 'lines', 50000).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const added: string[] = [];
+      const duplicates: string[] = [];
+      const malformed: number[] = [];
+      for (const [i, line] of lines.entries()) {
+        const parts = line.split(/\s*[|\t]\s*/);
+        if (parts.length < 3 || !parts[0] || !parts[1] || !parts.slice(2).join(' ').trim()) {
+          malformed.push(i + 1);
+          continue;
+        }
+        const [name, question, ...rest] = parts;
+        const result = await q.addGuest(event.id, { name, question, answerHash: await hashAnswer(rest.join(' ')) });
+        (result === 'ok' ? added : duplicates).push(name);
+      }
+      const bits = [`Added ${added.length} guest${added.length === 1 ? '' : 's'}.`];
+      if (duplicates.length) bits.push(`Already on the list: ${duplicates.join(', ')}.`);
+      if (malformed.length) bits.push(`Skipped line${malformed.length === 1 ? '' : 's'} ${malformed.join(', ')}: use Name | Question | Answer.`);
+      return go('guests', bits.join(' '), added.length === 0);
+    }
+    case 'edit_guest': {
+      const id = uuid(form, 'guest');
+      const name = str(form, 'name', 120);
+      const question = str(form, 'question', 300);
+      if (!id || !name || !question) return go('guests', 'Name and question can’t be empty.', true);
+      const answer = str(form, 'answer', 300);
+      const result = await q.updateGuest(event.id, id, {
+        name,
+        question,
+        answerHash: answer ? await hashAnswer(answer) : undefined,
+        note: str(form, 'note', 1000),
+        maxPlusOnes: int(form, 'max_plus_ones', 0, 10),
+      });
+      return result === 'ok' ? go('guests', `Saved ${name}.`) : go('guests', `Another guest is already called ${name}.`, true);
+    }
+    case 'delete_guest': {
+      const id = uuid(form, 'guest');
+      if (id) await q.deleteGuest(event.id, id);
+      return go('guests', 'Guest removed, along with their RSVP, claims, and questions.');
+    }
+    case 'unlock_guest': {
+      const id = uuid(form, 'guest');
+      if (id) await q.unlockGuest(event.id, id);
+      return go('guests', 'Unlocked. They can try again now.');
+    }
+    case 'view_as_guest': {
+      const id = uuid(form, 'guest');
+      const guest = id ? await q.getGuest(id, event.id) : null;
+      if (!guest) return go('guests', 'That guest no longer exists.', true);
+      setGuestSession(Astro.cookies, { guestId: guest.id, eventId: event.id }, isSecure(Astro.url));
+      return Astro.redirect(`/e/${event.slug}/home`);
+    }
+
+    // ----- Bring -----
+    case 'add_bring': {
+      const label = str(form, 'label', 200);
+      if (!label) return go('bring', 'Write what they should bring.', true);
+      await q.addBring(event.id, label, uuid(form, 'guest'));
+      return go('bring', 'Added.');
+    }
+    case 'delete_bring': {
+      const id = uuid(form, 'item');
+      if (id) await q.deleteBring(event.id, id);
+      return go('bring', 'Removed.');
+    }
+
+    // ----- Registry -----
+    case 'add_gift':
+    case 'edit_gift': {
+      const title = str(form, 'title', 200);
+      if (!title) return go('registry', 'A gift needs a name.', true);
+      const item = {
+        title,
+        url: safeUrl(form, 'url'),
+        price: str(form, 'price', 40),
+        note: str(form, 'note', 300),
+        quantity: int(form, 'quantity', 1, 99, 1),
+      };
+      if (action === 'add_gift') {
+        await q.addRegistryItem(event.id, item);
+        return go('registry', `Added ${title}.`);
+      }
+      const id = uuid(form, 'item');
+      if (id) await q.updateRegistryItem(event.id, id, item);
+      return go('registry', `Saved ${title}.`);
+    }
+    case 'delete_gift': {
+      const id = uuid(form, 'item');
+      if (id) await q.deleteRegistryItem(event.id, id);
+      return go('registry', 'Removed from the registry.');
+    }
+
+    // ----- Questions -----
+    case 'reply': {
+      const id = uuid(form, 'post');
+      if (id) await q.replyToPost(event.id, id, str(form, 'reply', 4000));
+      return go('questions', 'Reply saved. The guest will see it next time they open their invitation.');
+    }
+    case 'set_public': {
+      const id = uuid(form, 'post');
+      const makePublic = str(form, 'public', 5) === 'yes';
+      if (id) await q.setPostPublic(event.id, id, makePublic);
+      return go('questions', makePublic ? 'Now visible to everyone invited.' : 'Now private.');
+    }
+    case 'delete_post': {
+      const id = uuid(form, 'post');
+      if (id) await q.deletePost(event.id, id);
+      return go('questions', 'Question deleted.');
+    }
+
+    default:
+      return Astro.redirect(`/admin/events/${event.id}`);
+  }
+}
+
+const flash = takeFlash(Astro.cookies);
+const [stats, guests, posts] = await Promise.all([q.eventStats(event.id), q.listGuests(event.id), q.listPosts(event.id)]);
+const unanswered = posts.filter((p) => !p.reply).length;
+const bring = tab === 'bring' ? await q.listBring(event.id) : [];
+const registry = tab === 'registry' ? await q.listRegistry(event.id, null) : [];
+const shareUrl = `${Astro.url.origin}/e/${event.slug}`;
+
+const labels: Record<Tab, string> = {
+  overview: 'Overview',
+  details: 'Details',
+  guests: `Guests`,
+  bring: 'What to bring',
+  registry: 'Registry',
+  questions: 'Questions',
+};
+---
+
+<AdminLayout title={event.title} flash={flash}>
+  <div class="page-head">
+    <div>
+      <h1>{event.title}</h1>
+      <p class="meta">{shortDate(event.starts_at, event.timezone)}{event.venue && `, ${event.venue}`}</p>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" type="button" data-copy={shareUrl}>Copy link</button>
+      <a class="btn btn-secondary" href={`/e/${event.slug}`} target="_blank" rel="noopener">Open guest page</a>
+    </div>
+  </div>
+
+  <nav class="tabs" aria-label="Event sections">
+    {
+      TABS.map((t) => (
+        <a href={`/admin/events/${event.id}?tab=${t}`} aria-current={t === tab ? 'page' : undefined}>
+          {labels[t]}
+          {t === 'guests' && <span class="muted"> {guests.length}</span>}
+          {t === 'questions' && unanswered > 0 && <span class="count">{unanswered}</span>}
+        </a>
+      ))
+    }
+  </nav>
+
+  {tab === 'overview' && <OverviewTab event={event} stats={stats} guests={guests} posts={posts} shareUrl={shareUrl} />}
+  {
+    tab === 'details' && (
+      <>
+        <EventForm values={detailValues} errors={detailErrors} submitLabel="Save changes" showSlug origin={Astro.url.origin} />
+        <div class="panel danger-zone" style="margin-top:32px">
+          <div class="panel-head">
+            <div>
+              <h2>Delete this event</h2>
+              <p>Removes every guest, RSVP, gift, and question. This can’t be undone.</p>
+            </div>
+          </div>
+          <form method="post" data-confirm={`Delete “${event.title}” and everything in it?`}>
+            <input type="hidden" name="action" value="delete_event" />
+            <button class="btn btn-danger" type="submit">Delete event</button>
+          </form>
+        </div>
+      </>
+    )
+  }
+  {tab === 'guests' && <GuestsTab event={event} guests={guests} origin={Astro.url.origin} />}
+  {tab === 'bring' && <BringTab items={bring} guests={guests} />}
+  {tab === 'registry' && <RegistryTab event={event} items={registry} />}
+  {tab === 'questions' && <QuestionsTab event={event} posts={posts} />}
+</AdminLayout>

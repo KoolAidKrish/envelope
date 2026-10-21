@@ -1,0 +1,17 @@
+---
+import GuestLayout from '../layouts/GuestLayout.astro';
+import Envelope from '../components/Envelope.astro';
+---
+
+<GuestLayout title="Envelope">
+  <main class="gate">
+    <div class="gate-inner">
+      <Envelope monogram="E" enter />
+      <div class="gate-heading">
+        <h1>Got an invitation?</h1>
+        <p>Open the link your host sent you. It goes straight to your envelope.</p>
+      </div>
+      <p class="gate-foot"><a href="/admin">Host sign-in</a></p>
+    </div>
+  </main>
+</GuestLayout>

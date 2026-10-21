@@ -1,0 +1,76 @@
+---
+import type { BringRow, GuestRow } from '../../lib/queries';
+
+interface Props {
+  items: BringRow[];
+  guests: GuestRow[];
+}
+const { items, guests } = Astro.props;
+
+const groups = new Map<string, { title: string; items: BringRow[] }>();
+for (const item of items) {
+  const key = item.guest_id ?? 'everyone';
+  if (!groups.has(key)) groups.set(key, { title: item.guest_name ?? 'Everyone', items: [] });
+  groups.get(key)!.items.push(item);
+}
+---
+
+<div class="grid-sidebar">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>What to bring</h2>
+      <p>Guests see their own items plus the ones for everyone.</p>
+    </div>
+    {
+      items.length === 0 ? (
+        <div class="empty-state">
+          <strong>Nothing on the list</strong>
+          If guests don’t need to bring anything, leave this empty and the section won’t appear.
+        </div>
+      ) : (
+        [...groups.values()].map((group) => (
+          <div style="margin-bottom:20px">
+            <h3 style="margin-bottom:6px">{group.title}</h3>
+            <ul class="rows">
+              {group.items.map((item) => (
+                <li class="row">
+                  <div class="row-main">
+                    <span>{item.label}</span>
+                    <form method="post" class="inline">
+                      <input type="hidden" name="action" value="delete_bring" />
+                      <input type="hidden" name="item" value={item.id} />
+                      <button class="btn-link danger" type="submit">
+                        Remove
+                      </button>
+                    </form>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      )
+    }
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Add an item</h2></div>
+    <form method="post" class="form">
+      <input type="hidden" name="action" value="add_bring" />
+      <label class="field">
+        <span>What</span>
+        <input type="text" name="label" required maxlength="200" placeholder="A swimsuit" />
+      </label>
+      <label class="field">
+        <span>Who</span>
+        <select name="guest">
+          <option value="">Everyone</option>
+          {guests.map((g) => <option value={g.id}>{g.name}</option>)}
+        </select>
+      </label>
+      <div class="form-actions">
+        <button class="btn" type="submit">Add item</button>
+      </div>
+    </form>
+  </div>
+</div>

@@ -1,0 +1,469 @@
+---
+import GuestLayout from '../../../layouts/GuestLayout.astro';
+import Envelope from '../../../components/Envelope.astro';
+import {
+  getEventBySlug,
+  getGuest,
+  touchGuest,
+  setRsvp,
+  listBringForGuest,
+  listRegistry,
+  claimItem,
+  unclaimItem,
+  listPostsForGuest,
+  addPost,
+  deleteOwnPost,
+  type Rsvp,
+} from '../../../lib/queries';
+import { getGuestSession } from '../../../lib/auth';
+import { str, int, uuid } from '../../../lib/form';
+import { eventDateParts, relativeDay, timeAgo } from '../../../lib/time';
+
+const slug = Astro.params.slug ?? '';
+const event = await getEventBySlug(slug);
+const session = getGuestSession(Astro.cookies);
+if (!event || session?.eventId !== event.id) return Astro.redirect(`/e/${slug}`);
+const guest = await getGuest(session.guestId, event.id);
+if (!guest) return Astro.redirect(`/e/${slug}`);
+
+const back = (message: string, anchor: string) => Astro.redirect(`/e/${slug}/home?m=${message}#${anchor}`);
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = str(form, 'action', 20);
+
+  if (action === 'rsvp') {
+    const choice = str(form, 'rsvp', 10) as Rsvp;
+    if (['yes', 'maybe', 'no'].includes(choice)) {
+      await setRsvp(guest.id, choice, int(form, 'plus_ones', 0, guest.max_plus_ones), str(form, 'rsvp_note', 500));
+      return back('rsvp', 'rsvp');
+    }
+    return back('rsvp_missing', 'rsvp');
+  }
+
+  if (action === 'claim' || action === 'unclaim') {
+    const itemId = uuid(form, 'item');
+    if (itemId && action === 'claim') return back((await claimItem(event.id, itemId, guest.id)) === 'ok' ? 'claimed' : 'gone', 'registry');
+    if (itemId) await unclaimItem(itemId, guest.id);
+    return back('released', 'registry');
+  }
+
+  if (action === 'ask') {
+    const body = str(form, 'body', 2000);
+    if (!body) return back('ask_empty', 'questions');
+    await addPost(event.id, guest.id, body, str(form, 'visibility', 10) === 'public');
+    return back('asked', 'questions');
+  }
+
+  if (action === 'unask') {
+    const postId = uuid(form, 'post');
+    if (postId) await deleteOwnPost(postId, guest.id);
+    return back('withdrawn', 'questions');
+  }
+
+  return Astro.redirect(`/e/${slug}/home`);
+}
+
+await touchGuest(guest.id);
+const [bring, registry, posts] = await Promise.all([
+  listBringForGuest(event.id, guest.id),
+  listRegistry(event.id, guest.id),
+  listPostsForGuest(event.id, guest.id),
+]);
+
+const host = event.host_name || 'your host';
+const hostShort = event.host_name || 'the host';
+const hostCap = event.host_name || 'Your host';
+const firstName = guest.name.split(/\s+/)[0];
+const when = eventDateParts(event.starts_at, event.ends_at, event.timezone);
+const relative = relativeDay(event.starts_at, event.timezone);
+const isPast = event.starts_at.getTime() < Date.now() - 86400e3;
+const msLeft = event.starts_at.getTime() - Date.now();
+const countdown = msLeft > 0 && {
+  d: Math.floor(msLeft / 864e5),
+  h: String(Math.floor(msLeft / 36e5) % 24).padStart(2, '0'),
+  m: String(Math.floor(msLeft / 6e4) % 60).padStart(2, '0'),
+  s: String(Math.floor(msLeft / 1e3) % 60).padStart(2, '0'),
+};
+const mapsUrl =
+  event.map_url ||
+  (event.address || event.venue
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([event.venue, event.address].filter(Boolean).join(', '))}`
+    : '');
+const monogram = (event.title.match(/[\p{L}\p{N}]/u)?.[0] ?? '✶').toUpperCase();
+const opened = Astro.url.searchParams.get('opened') === '1';
+
+const gifts = registry.map((item) => {
+  const left = Math.max(item.quantity - item.claimed, 0);
+  const gone = left === 0 && !item.mine;
+  const meta = [item.price, item.note, item.quantity > 1 && !gone ? `${left} of ${item.quantity} left` : '']
+    .filter(Boolean)
+    .join('. ');
+  return { ...item, gone, meta };
+});
+const everyoneBring = bring.filter((b) => !b.guest_id);
+const myBring = bring.filter((b) => b.guest_id);
+
+const rsvpLine = {
+  yes: `You're going${guest.plus_ones ? `, bringing ${guest.plus_ones} ${guest.plus_ones === 1 ? 'guest' : 'guests'}` : ''}.`,
+  maybe: "You said maybe. Update this once you know.",
+  no: `You can't make it. ${hostCap} has been told.`,
+  pending: '',
+}[guest.rsvp];
+
+type Flash = { text: string; icon: 'check' | 'gift' | 'send' | 'info'; fx?: 'party' | 'gift' };
+const flashes: Record<string, Flash> = {
+  rsvp: guest.rsvp === 'yes'
+    ? { text: 'You’re going! RSVP saved', icon: 'check', fx: 'party' }
+    : { text: 'RSVP saved', icon: 'check' },
+  rsvp_missing: { text: 'Pick going, maybe, or can’t make it', icon: 'info' },
+  claimed: { text: 'Claimed. It’s yours to bring.', icon: 'gift', fx: 'gift' },
+  gone: { text: 'Someone just claimed the last one', icon: 'info' },
+  released: { text: 'Released for someone else to claim', icon: 'check' },
+  asked: { text: 'Question sent', icon: 'send' },
+  ask_empty: { text: 'Write your question first', icon: 'info' },
+  withdrawn: { text: 'Question removed', icon: 'check' },
+};
+const flash = flashes[Astro.url.searchParams.get('m') ?? ''];
+const flashIcons = {
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+  gift: 'M4 11h16v9H4zM3 7h18v4H3zM12 7v13M12 7c-1.5-3-5-3.5-5-1s3 1 5 1c2 0 5 1.5 5-1s-3.5-2-5 1',
+  send: 'M21 3L10 14M21 3l-7 18-4-7-7-4z',
+  info: 'M12 8v5M12 16.5v.5M12 3a9 9 0 100 18 9 9 0 000-18z',
+};
+
+const jumps = [
+  { id: 'rsvp', label: 'RSVP', show: true },
+  { id: 'details', label: 'Details', show: !!event.details },
+  { id: 'bring', label: 'Bring', show: bring.length > 0 },
+  { id: 'registry', label: 'Registry', show: registry.length > 0 },
+  { id: 'questions', label: 'Questions', show: true },
+].filter((j) => j.show);
+---
+
+<GuestLayout title={`${event.title} | Your invitation`} theme={event.theme} bodyClass={opened ? 'opened' : flash ? 'after-action' : undefined}>
+  {
+    opened && (
+      <div class="opening" aria-hidden="true">
+        <p class="opening-for">For {guest.name}</p>
+        <Envelope monogram={monogram} />
+        <p class="opening-skip">Tap to skip</p>
+      </div>
+    )
+  }
+
+  <main class="home">
+    <header class="topbar">
+      <span>For <strong>{guest.name}</strong></span>
+      <form method="post" action={`/e/${slug}/logout`}>
+        <button class="link-btn" type="submit">Sign out</button>
+      </form>
+    </header>
+
+    <article class="card">
+      {event.host_name && <p class="card-host">{event.host_name} invites you to</p>}
+      <h1>{event.title}</h1>
+      {event.tagline && <p class="card-tagline">{event.tagline}</p>}
+
+      <div class="when">
+        <span class="when-day" aria-hidden="true">{when.day}</span>
+        <p class="when-date">{when.fullDate}</p>
+        <p class="when-time">{when.timeRange} {when.zone}</p>
+        {!isPast && <span class="when-relative">{relative}</span>}
+      </div>
+
+      {
+        countdown && (
+          <div class="countdown" data-countdown={event.starts_at.toISOString()} role="timer" aria-label={`Starts ${relative}`}>
+            <div class="cd-unit">
+              <span class="cd-num" data-unit="d">{countdown.d}</span>
+              <span class="cd-label">{countdown.d === 1 ? 'day' : 'days'}</span>
+            </div>
+            <div class="cd-unit">
+              <span class="cd-num" data-unit="h">{countdown.h}</span>
+              <span class="cd-label">hrs</span>
+            </div>
+            <div class="cd-unit">
+              <span class="cd-num" data-unit="m">{countdown.m}</span>
+              <span class="cd-label">min</span>
+            </div>
+            <div class="cd-unit">
+              <span class="cd-num" data-unit="s">{countdown.s}</span>
+              <span class="cd-label">sec</span>
+            </div>
+            <p class="cd-now">It’s happening now!</p>
+          </div>
+        )
+      }
+
+      {
+        (event.venue || event.address) && (
+          <div class="where">
+            {event.venue && <p class="where-venue">{event.venue}</p>}
+            {event.address && <p class="where-address">{event.address}</p>}
+          </div>
+        )
+      }
+
+      <div class="card-actions">
+        {mapsUrl && (
+          <a class="btn btn-quiet btn-small" href={mapsUrl} target="_blank" rel="noopener noreferrer">
+            Open in Maps
+          </a>
+        )}
+        <a class="btn btn-quiet btn-small" href={`/e/${slug}/calendar.ics`}>Add to calendar</a>
+      </div>
+
+      {event.dress_code && (
+        <p class="card-dress">
+          <strong>Dress code:</strong> {event.dress_code}
+        </p>
+      )}
+
+      {
+        guest.note && (
+          <blockquote class="card-note">
+            {guest.note}
+            {event.host_name && <footer>From {event.host_name}, just for you</footer>}
+          </blockquote>
+        )
+      }
+    </article>
+
+    <nav class="jump" aria-label="Sections">
+      {jumps.map((j) => (
+        <a href={`#${j.id}`}>
+          {j.label}
+          {j.id === 'rsvp' && guest.rsvp === 'pending' && <i class="jump-dot" title="Waiting on your RSVP" />}
+        </a>
+      ))}
+    </nav>
+
+    <section class="section" id="rsvp" data-reveal>
+      <h2>Will you be there?</h2>
+      {rsvpLine ? <p class="rsvp-current">{rsvpLine}</p> : <p class="section-lede">Let {host} know so they can plan.</p>}
+      <form class="rsvp-form stack" method="post">
+        <input type="hidden" name="action" value="rsvp" />
+        <fieldset class="choices">
+          <legend class="visually-hidden">Your answer</legend>
+          <label class="choice">
+            <input type="radio" name="rsvp" value="yes" checked={guest.rsvp === 'yes'} />
+            <span>
+              <svg class="choice-icon" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="1" d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+              Going
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="rsvp" value="maybe" checked={guest.rsvp === 'maybe'} />
+            <span>
+              <svg class="choice-icon" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="1" d="M3.5 13c2.8-4 5.7-4 8.5 0s5.7 4 8.5 0" /></svg>
+              Maybe
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="rsvp" value="no" checked={guest.rsvp === 'no'} />
+            <span>
+              <svg class="choice-icon" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="1" d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+              Can’t make it
+            </span>
+          </label>
+        </fieldset>
+        {
+          guest.max_plus_ones > 0 && (
+            <label class="field if-coming">
+              <span>Bringing anyone?</span>
+              <select name="plus_ones">
+                {Array.from({ length: guest.max_plus_ones + 1 }, (_, n) => (
+                  <option value={n} selected={n === guest.plus_ones}>
+                    {n === 0 ? 'Just me' : `Me plus ${n}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )
+        }
+        <label class="field">
+          <span>Anything {hostShort} should know?</span>
+          <textarea name="rsvp_note" rows="2" maxlength="500" placeholder="Allergies, arriving late, that kind of thing">{guest.rsvp_note}</textarea>
+        </label>
+        <div>
+          <button class="btn" type="submit">{guest.rsvp === 'pending' ? 'Send RSVP' : 'Update RSVP'}</button>
+        </div>
+      </form>
+    </section>
+
+    {
+      event.details && (
+        <section class="section" id="details" data-reveal>
+          <h2>The details</h2>
+          <p class="details-text">{event.details}</p>
+        </section>
+      )
+    }
+
+    {
+      bring.length > 0 && (
+        <section class="section" id="bring" data-bring-key={`envelope:bring:${guest.id}`} data-reveal>
+          <h2>What to bring</h2>
+          <p class="section-lede">Tick things off as you pack. Only you see the ticks.</p>
+          <div class="pack-meter" data-pack-meter hidden>
+            <div class="pack-bar"><span /></div>
+            <p class="pack-text" aria-live="polite" />
+          </div>
+          {myBring.length > 0 && (
+            <div class="checklist-group">
+              <h3>Just for you</h3>
+              <ul class="checklist">
+                {myBring.map((b) => (
+                  <li>
+                    <label>
+                      <input type="checkbox" data-bring={b.id} />
+                      <span><span class="strike">{b.label}</span></span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {everyoneBring.length > 0 && (
+            <div class="checklist-group">
+              {myBring.length > 0 && <h3>Everyone</h3>}
+              <ul class="checklist">
+                {everyoneBring.map((b) => (
+                  <li>
+                    <label>
+                      <input type="checkbox" data-bring={b.id} />
+                      <span><span class="strike">{b.label}</span></span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )
+    }
+
+    {
+      registry.length > 0 && (
+        <section class="section" id="registry" data-reveal>
+          <h2>Gift registry</h2>
+          <p class="section-lede">
+            Claim something so nobody doubles up.
+            {event.host_sees_claims ? ` ${hostCap} can see who claimed what.` : ` ${hostCap} won’t see who picked what.`}
+          </p>
+          <ul class="gifts">
+              {gifts.map((item) => (
+              <li class:list={['gift', { 'is-mine': item.mine, 'is-gone': item.gone }]}>
+                <p class="gift-title">
+                  {item.url ? (
+                    <a href={item.url} target="_blank" rel="noopener noreferrer">
+                      {item.title}
+                    </a>
+                  ) : (
+                    item.title
+                  )}
+                </p>
+                <div class="gift-action">
+                  {item.mine ? (
+                    <Fragment>
+                      <span class="gift-status">You’re getting this</span>
+                      <form method="post">
+                        <input type="hidden" name="action" value="unclaim" />
+                        <input type="hidden" name="item" value={item.id} />
+                        <button class="link-btn" type="submit">Release</button>
+                      </form>
+                    </Fragment>
+                  ) : item.gone ? (
+                    <span class="gift-status">Taken</span>
+                  ) : (
+                    <form method="post">
+                      <input type="hidden" name="action" value="claim" />
+                      <input type="hidden" name="item" value={item.id} />
+                      <button class="btn btn-small" type="submit">I’ll get this</button>
+                    </form>
+                  )}
+                </div>
+                {item.meta && <p class="gift-meta">{item.meta}</p>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    <section class="section" id="questions" data-reveal>
+      <h2>Questions for {hostShort}</h2>
+      <p class="section-lede">Ask anything about the day. You’ll see the reply here.</p>
+      <form class="ask-form stack" method="post">
+        <input type="hidden" name="action" value="ask" />
+        <label class="field">
+          <span class="visually-hidden">Your question</span>
+          <textarea name="body" rows="3" maxlength="2000" required placeholder="Is there parking nearby?"></textarea>
+        </label>
+        <fieldset class="visibility">
+          <legend class="visually-hidden">Who can see it</legend>
+          <label><input type="radio" name="visibility" value="private" checked /> Only {hostShort} sees it</label>
+          <label><input type="radio" name="visibility" value="public" /> Share with everyone invited</label>
+        </fieldset>
+        <div>
+          <button class="btn btn-send" type="submit">
+            Send question
+            <svg class="plane" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3L10 14M21 3l-7 18-4-7-7-4z" /></svg>
+          </button>
+        </div>
+      </form>
+
+      {
+        posts.length > 0 && (
+          <ol class="thread">
+            {posts.map((p) => {
+              const mine = p.guest_id === guest.id;
+              return (
+                <li>
+                  <div class="post-head">
+                    <strong>{mine ? 'You' : p.guest_name.split(/\s+/)[0]}</strong>
+                    <span>{timeAgo(p.created_at)}</span>
+                    {mine && <span class="chip">{p.is_public ? 'Shared with everyone' : 'Private'}</span>}
+                  </div>
+                  <p class="post-body">{p.body}</p>
+                  {p.reply ? (
+                    <div class="post-reply">
+                      <div class="post-head">
+                        <strong>{event.host_name || 'Host'}</strong>
+                        {p.replied_at && <span>{timeAgo(p.replied_at)}</span>}
+                      </div>
+                      <p class="post-body">{p.reply}</p>
+                    </div>
+                  ) : (
+                    mine && (
+                      <div class="post-waiting">
+                        <span>Waiting for a reply</span>
+                        <form method="post">
+                          <input type="hidden" name="action" value="unask" />
+                          <input type="hidden" name="post" value={p.id} />
+                          <button class="link-btn" type="submit">Remove</button>
+                        </form>
+                      </div>
+                    )
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )
+      }
+    </section>
+
+    <p class="page-foot">Sent with Envelope</p>
+  </main>
+
+  {
+    flash && (
+      <p class="flash" role="status" data-fx={flash.fx}>
+        <svg class="flash-icon" viewBox="0 0 24 24" aria-hidden="true"><path d={flashIcons[flash.icon]} /></svg>
+        {flash.text}
+      </p>
+    )
+  }
+</GuestLayout>

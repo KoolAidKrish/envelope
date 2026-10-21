@@ -1,0 +1,36 @@
+---
+import '../styles/guest.css';
+import { fontsHref, getTheme } from '../lib/themes';
+
+interface Props {
+  title: string;
+  theme?: string;
+  bodyClass?: string;
+}
+const { title, theme: themeId, bodyClass } = Astro.props;
+const theme = getTheme(themeId);
+---
+
+<!doctype html>
+<html lang="en" data-theme={theme.id}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="same-origin" />
+    <title>{title}</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href={fontsHref(theme)} />
+    <!-- Scroll reveals only hide content once we know scripts can show it again. -->
+    <script is:inline>document.documentElement.classList.add('js');</script>
+  </head>
+  <body class={bodyClass}>
+    <canvas class="ambient" data-ambient aria-hidden="true"></canvas>
+    <slot />
+    <script>
+      import '../scripts/guest';
+    </script>
+  </body>
+</html>

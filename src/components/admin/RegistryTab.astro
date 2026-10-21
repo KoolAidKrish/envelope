@@ -1,0 +1,136 @@
+---
+import type { EventRow, RegistryRow } from '../../lib/queries';
+
+interface Props {
+  event: EventRow;
+  items: RegistryRow[];
+}
+const { event, items } = Astro.props;
+// Badge state per gift, computed here so the template has no `<` comparisons.
+const claimBadge = (item: RegistryRow) => {
+  if (item.claimed === 0) return { yes: false, maybe: false };
+  const full = item.claimed >= item.quantity;
+  return { yes: full, maybe: !full };
+};
+---
+
+<div class="grid-sidebar">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Gift registry</h2>
+      <p>
+        {event.host_sees_claims ? 'You can see who claimed what.' : 'Claims are hidden so gifts stay a surprise.'}{' '}
+        <a href={`/admin/events/${event.id}?tab=details`}>Change</a>
+      </p>
+    </div>
+    {
+      items.length === 0 ? (
+        <div class="empty-state">
+          <strong>No gifts listed</strong>
+          The registry only appears for guests once you add something.
+        </div>
+      ) : (
+        <ul class="rows">
+          {items.map((item) => (
+            <li class="row">
+              <div class="row-main">
+                <div>
+                  <p class="row-title">
+                    {item.url ? (
+                      <a href={item.url} target="_blank" rel="noopener noreferrer">
+                        {item.title}
+                      </a>
+                    ) : (
+                      item.title
+                    )}
+                  </p>
+                  <p class="row-sub">
+                    {[item.price, item.quantity > 1 ? `Wants ${item.quantity}` : '', item.note].filter(Boolean).join('. ')}
+                  </p>
+                </div>
+                {event.host_sees_claims && (
+                  <span class:list={['badge', claimBadge(item)]}>
+                    {item.claimed === 0 ? 'Not claimed' : `${item.claimers.join(', ')}`}
+                  </span>
+                )}
+              </div>
+              <details>
+                <summary>Edit</summary>
+                <form method="post" class="form">
+                  <input type="hidden" name="action" value="edit_gift" />
+                  <input type="hidden" name="item" value={item.id} />
+                  <label class="field">
+                    <span>Gift</span>
+                    <input type="text" name="title" value={item.title} required maxlength="200" />
+                  </label>
+                  <label class="field">
+                    <span>Link</span>
+                    <input type="text" name="url" value={item.url} />
+                  </label>
+                  <div class="form-row">
+                    <label class="field">
+                      <span>Price</span>
+                      <input type="text" name="price" value={item.price} maxlength="40" />
+                    </label>
+                    <label class="field">
+                      <span>How many</span>
+                      <input type="number" name="quantity" value={item.quantity} min="1" max="99" />
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>Note</span>
+                    <input type="text" name="note" value={item.note} maxlength="300" />
+                  </label>
+                  <div class="form-actions">
+                    <button class="btn btn-small" type="submit">
+                      Save gift
+                    </button>
+                  </div>
+                </form>
+                <form method="post" data-confirm={`Remove ${item.title}? Any claims on it are cleared.`} style="margin-top:12px">
+                  <input type="hidden" name="action" value="delete_gift" />
+                  <input type="hidden" name="item" value={item.id} />
+                  <button class="btn-link danger" type="submit">
+                    Remove from registry
+                  </button>
+                </form>
+              </details>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Add a gift</h2></div>
+    <form method="post" class="form">
+      <input type="hidden" name="action" value="add_gift" />
+      <label class="field">
+        <span>Gift</span>
+        <input type="text" name="title" required maxlength="200" placeholder="Pour-over coffee set" />
+      </label>
+      <label class="field">
+        <span>Link <span class="muted">(optional)</span></span>
+        <input type="text" name="url" placeholder="https://" />
+      </label>
+      <div class="form-row">
+        <label class="field">
+          <span>Price <span class="muted">(optional)</span></span>
+          <input type="text" name="price" maxlength="40" placeholder="About $40" />
+        </label>
+        <label class="field">
+          <span>How many</span>
+          <input type="number" name="quantity" value="1" min="1" max="99" />
+        </label>
+      </div>
+      <label class="field">
+        <span>Note <span class="muted">(optional)</span></span>
+        <input type="text" name="note" maxlength="300" placeholder="Any colour but white" />
+      </label>
+      <div class="form-actions">
+        <button class="btn" type="submit">Add gift</button>
+      </div>
+    </form>
+  </div>
+</div>
